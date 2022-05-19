@@ -3,6 +3,7 @@ pragma solidity ^0.8.11;
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
+import {console} from "forge-std/console.sol";
 import {ERC721AMock} from "../Contracts/mocks/ERC721AMock.sol";
 import {ERC721A__IERC721Receiver} from "../Contracts/ERC721A.sol";
 
@@ -166,7 +167,7 @@ contract ERC721ATest is Test {
         assertEq(recipient.data(), "");
     }
     
-    function testSafeTransferFromToERC721RecipientWithData() public { 
+    function testSafeTransferFormToERC721RecipientWithData() public { 
         erc721a.mint(minter, 1);    // mint 1 NFT
         vm.prank(minter);
         erc721a.setApprovalForAll(address(this), true);
@@ -480,13 +481,12 @@ contract ERC721ATest is Test {
 
         vm.startPrank(_to);
         erc721a.mint(_to,id);
-
-        erc721a.approve(alice, id-1);
-        assertEq(erc721a.getApproved(id-1),alice);
+        erc721a.approve(address(1), id-1);
+        assertEq(erc721a.getApproved(id-1),address(1));
     }
     
     function testFuzzApproveBurn(address _to, uint8 id) public {
-        if(_to == address(0))
+        if(_to == address(0) || _to == address(this))
             _to = minter;
         if(id == 0)
             id = 1;
@@ -503,14 +503,16 @@ contract ERC721ATest is Test {
     }
 
     function testFuzzApproveAll(address _to, bool approved) public {
+        if (_to == address(this))
+            _to = address(1);
         erc721a.setApprovalForAll(_to, approved);
         assertEq(erc721a.isApprovedForAll(address(this), _to),approved);
     }
 
     function testFuzzTransferFrom(address _from,address _to , uint8 id) public {
         if(_to == address(0) || _to == _from)
-            _to = minter;
-        if(_from == address(0))
+            _to = address(0xBAC);
+        if(_from == address(0) || _from == address(this))
             _from = alice;
         if(id == 0)
             id = 1;
@@ -521,7 +523,7 @@ contract ERC721ATest is Test {
         uint balance = erc721a.balanceOf(_from);
         for (uint i = 0 ; i < id ; ++i) {
             erc721a.transferFrom(_from, _to, i);
-            assertEq(erc721a.getApproved(i),adress(0));
+            assertEq(erc721a.getApproved(i),address(0));
             assertEq(erc721a.balanceOf(_from),--balance);
             assertEq(erc721a.balanceOf(_to),i+1);
         }
@@ -529,7 +531,7 @@ contract ERC721ATest is Test {
 
     function testFuzzTransferFromSelf(address _to, uint8 id) public {
         if(_to == address(0) || _to == address(this))
-            _to = alice;
+            _to = address(1);
         if (id == 0)
             id = 1;
         erc721a.mint(address(this),id);
@@ -538,11 +540,124 @@ contract ERC721ATest is Test {
 
         for (uint i = 0 ; i < id ; ++i) {
             erc721a.transferFrom(address(this), _to, i);
-            ssertEq(erc721a.getApproved(i),address(0));
+            assertEq(erc721a.getApproved(i),address(0));
             assertEq(erc721a.balanceOf(address(this)),--balance);
             assertEq(erc721a.balanceOf(_to),i+1);
         }
     }
     
+    // condition1 _from != _to
+    // condition2 _from != address(this)             // setApprovalAll thorw error
+    // condition3 _to != address(0) & _from != address(0)
+    function testFuzzTransferFromApprovalAll(address _from, address _to, uint8 _id) public {
+        if(_to == address(0) || _to == _from)
+            _to = address(1);
+        if(_from == address(0) || _from == address(this))
+            _from = address(0xBCD);
+        if(_id == 0)
+            _id = 1;
+        erc721a.mint(_from,_id);
+        vm.prank(_from);
+        erc721a.setApprovalForAll(address(this),true);
+
+        uint balance = erc721a.balanceOf(_from);
+        for (uint i = 0 ; i < _id ; ++i) {
+            erc721a.transferFrom(_from, _to, i);
+            assertEq(erc721a.getApproved(i),address(0));
+            assertEq(erc721a.balanceOf(_from),--balance);
+            assertEq(erc721a.balanceOf(_to),i+1);
+        }
+    }
+
+    function testFuzzSafeTransferFromToEOA(address _from , uint8 id) public{
+        address _to = address(1);
+        if (_from == address(0) || _from == address(this))
+            _from = alice;
+        if (id == 0)
+            id = 1;
+        erc721a.mint(_from,id);
+        vm.prank(_from);
+        erc721a.setApprovalForAll(address(this),true);
+        erc721a.safeTransferFrom(_from, _to, id-1);
+        assertEq(erc721a.getApproved(id-1),address(0));
+        assertEq(erc721a.balanceOf(_from),erc721a.totalSupply()-1);
+        assertEq(erc721a.balanceOf(_to),1);
+        assertEq(erc721a.ownerOf(id-1),_to);
+
+    }
+
+    function testFuzzSafeTransferFormToERC721Recipient(address _from , uint8 id) public {
+        ERC721ARecipient _to = new ERC721ARecipient();
+        if (_from == address(0) || address(_to) == _from)
+            _from = address(0xBCF);
+        if (id == 0)
+            id = 1;
+        
+        erc721a.mint(_from,id);
+
+        if (_from != address(this)) {
+            vm.prank(_from);
+            erc721a.setApprovalForAll(address(this),true);
+        }
+
+        erc721a.safeTransferFrom(_from, address(_to), id-1);
+        assertEq(erc721a.getApproved(id-1),address(0));
+        assertEq(erc721a.balanceOf(_from),(erc721a.totalSupply()-1));
+        assertEq(erc721a.balanceOf(address(_to)),1);
+        assertEq(erc721a.ownerOf(id-1),address(_to));
+        assertEq(_to.data(),"");
+    }
+
+    function testFuzzSafeTransferFormToERC721RecipientWithData(address _from , uint8 id) public {
+        ERC721ARecipient _to = new ERC721ARecipient();
+        if (_from == address(0) || address(_to) == _from)
+            _from = address(0xBCF);
+        if (id == 0)
+            id = 1;
+        
+        erc721a.mint(_from,id);
+
+        if (_from != address(this)) {
+            vm.prank(_from);
+            erc721a.setApprovalForAll(address(this),true);
+        }
+
+        erc721a.safeTransferFrom(_from, address(_to), id-1 , "Test");
+        assertEq(erc721a.getApproved(id-1),address(0));
+        assertEq(erc721a.balanceOf(_from),(erc721a.totalSupply()-1));
+        assertEq(erc721a.balanceOf(address(_to)),1);
+        assertEq(erc721a.ownerOf(id-1),address(_to));
+        assertEq(_to.data(),"Test");
+    }
+    
+    function testFuzzSafeMintToEOA(address _to, uint8 amount) public {
+        if (_to == address(0) || _to == address(this))
+            _to = address(1);
+        if (amount == 0)
+            amount = 1;
+        erc721a.safeMint(_to,amount);
+        assertEq(erc721a.balanceOf(_to),amount);
+    }
+
+    function testFuzzSafeMintToERC721Recipient(uint8 amount) public {
+        ERC721ARecipient _to = new ERC721ARecipient();
+        if (amount == 0)
+            amount = 1;
+        erc721a.safeMint(address(_to),amount);
+        assertEq(erc721a.balanceOf(address(_to)),amount);
+        assertEq(_to.data(),"");
+    }
+
+    function testFuzzSafeMintToERC721RecipientWithData(uint8 amount) public {
+        ERC721ARecipient _to = new ERC721ARecipient();
+        if (amount == 0)
+            amount = 1;
+        erc721a.safeMint(address(_to),amount,"Test");
+        assertEq(erc721a.balanceOf(address(_to)),amount);
+        assertEq(_to.data(),"Test");
+    }
+
+    
+
 }
 
